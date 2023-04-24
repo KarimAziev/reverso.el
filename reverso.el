@@ -77,7 +77,7 @@
   :group 'reverso)
 
 (defface reverso-keyword-face
-  '((t (:inherit transient-value)))
+  '((t (:inherit font-lock-builtin-face)))
   "Face for various keywords in reverso buffers."
   :group 'reverso)
 
@@ -127,6 +127,21 @@
   "Mapping from long language names to short ones.
 
 This one is used for the translation queries.")
+
+(defcustom reverso-recode-alist nil
+  "Alist of languages and new coding with old codings."
+  :group 'reverso
+  :type `(alist
+          :key-type (radio :tag "Language"
+                           ,@(mapcar
+                              (pcase-lambda (`(,key . ,_val))
+                                `(const
+                                  ,key))
+                              reverso--language-mapping))
+          :value-type
+          (list
+           (coding-system :tag "Old coding")
+           (coding-system :tag "New coding"))))
 
 (defconst reverso--language-mapping-1
   '((english . en)
@@ -303,7 +318,8 @@ The result is an alist with the following keys:
     (error "Wrong language: %s" target))
   (unless (member target
                   (alist-get source
-                             (alist-get 'translation reverso--languages-compatible)))
+                             (alist-get 'translation
+                                        reverso--languages-compatible)))
     (error "Language %s is not compatible with %s" target source))
   (request (alist-get 'translation reverso--urls)
     :type "POST"
@@ -338,7 +354,8 @@ selected word in the context search.  This function fontifies words
 that are in tags with `reverso-highlight-face'"
   (thread-last
     (mapconcat (lambda (node)
-                 (let ((text (if (listp node) (dom-texts node) node))
+                 (let ((text (if (listp node)
+                                 (dom-texts node) node))
                        (is-special (listp node)))
                    (if is-special
                        (propertize text 'face 'reverso-highlight-face)
@@ -358,7 +375,8 @@ that are in tags with `reverso-highlight-face'"
     (reverso--convert-string
      (car
       (dom-by-tag
-       (libxml-parse-html-region (point-min) (point-max))
+       (libxml-parse-html-region (point-min)
+                                 (point-max))
        'body)))))
 
 (defun reverso--alist-remove-empty-values (alist)
@@ -377,36 +395,50 @@ ALIST is an alist, LOOKUP-VALUE is a value to look in `cdr'."
 
 (defun reverso--translate-parse (response)
   "Convert RESPONSE from the reverso translation API into an alist."
-  (let ((corrected-text (alist-get 'correctedText response))
-        (language-from (reverso--alist-get-inv
-                        reverso--language-mapping
-                        (intern (alist-get 'from response))))
-        (language-to (reverso--alist-get-inv
+  (let ((language-to (reverso--alist-get-inv
                       reverso--language-mapping
-                      (intern (alist-get 'to response))))
-        (detected-language (reverso--alist-get-inv
-                            reverso--language-mapping
-                            (intern (or
-                                     (alist-get 'detectedLanguage
-                                                (alist-get 'languageDetection response))
-                                     "nil"))))
-        (translation (seq-elt (alist-get 'translation response) 0))
-        (context-results
-         (cl-loop for r across (alist-get 'results (alist-get 'contextResults response))
-                  collect
-                  `((:translation . ,(alist-get 'translation r))
-                    (:context
-                     . ,(cl-loop for source across (alist-get 'sourceExamples r)
-                                 for target across (alist-get 'targetExamples r)
-                                 collect
-                                 `((:source . ,(reverso--convert-string-html source))
-                                   (:target . ,(reverso--convert-string-html target)))))))))
-    `((:corrected-text . ,corrected-text)
-      (:language-from . ,language-from)
-      (:language-to . ,language-to)
-      (:detected-language . ,detected-language)
-      (:translation . ,translation)
-      (:context-results . ,context-results))))
+                      (intern (alist-get 'to response)))))
+    (let ((corrected-text (alist-get 'correctedText response))
+          (language-from (reverso--alist-get-inv
+                          reverso--language-mapping
+                          (intern (alist-get 'from response))))
+          (detected-language (reverso--alist-get-inv
+                              reverso--language-mapping
+                              (intern (or
+                                       (alist-get 'detectedLanguage
+                                                  (alist-get 'languageDetection
+                                                             response))
+                                       "nil"))))
+          (translation (seq-elt (alist-get 'translation response) 0))
+          (context-results
+           (cl-loop for r across (alist-get 'results (alist-get 'contextResults
+                                                                response))
+                    collect
+                    `((:translation .
+                                    ,(reverso-recode language-to
+                                                     (alist-get
+                                                      'translation r)))
+                      (:context .
+                                ,(cl-loop for source across (alist-get
+                                                             'sourceExamples
+                                                             r)
+                                          for target across (alist-get
+                                                             'targetExamples
+                                                             r)
+                                          collect
+                                          `((:source . ,(reverso--convert-string-html
+                                                         source))
+                                            (:target .
+                                                     ,(reverso--convert-string-html
+                                                       (reverso-recode
+                                                        language-to
+                                                        target))))))))))
+      `((:corrected-text . ,corrected-text)
+        (:language-from . ,language-from)
+        (:language-to . ,language-to)
+        (:detected-language . ,detected-language)
+        (:translation . ,(reverso-recode language-to translation))
+        (:context-results . ,context-results)))))
 
 (defun reverso--get-context (text source target cb)
   "Find bilingual concordances for TEXT.
@@ -429,23 +461,29 @@ The result is a list of alists with the keys:
                   (alist-get source
                              (alist-get 'context reverso--languages-compatible)))
     (error "Language %s is not compatible with %s" target source))
-  (request (concat (alist-get 'context reverso--urls)
-                   (symbol-name source) "-" (symbol-name target) "/"
-                   (replace-regexp-in-string
-                    "%20" "+" (url-hexify-string text) t t))
-    :type "GET"
-    :headers `(("Accept" . "*/*")
-               ("Connection" . "keep-alive")
-               ("User-Agent" . ,reverso--user-agent))
-    :parser 'buffer-string
-    :encoding 'utf-8
-    :success (cl-function
-              (lambda (&key data &allow-other-keys)
-                (funcall cb (reverso--alist-remove-empty-values
-                             (reverso--get-context-parse data)))))
-    :error (cl-function
-            (lambda (&key error-thrown &allow-other-keys)
-              (message "Error!: %S" error-thrown)))))
+  (let ((url (concat (alist-get 'context reverso--urls)
+                     (symbol-name source) "-" (symbol-name target) "/"
+                     (replace-regexp-in-string
+                      "%20" "+" (url-hexify-string text) t t))))
+    (let ((download-buffer (url-retrieve-synchronously url))
+          (filename (concat (temporary-file-directory)
+                            (generate-new-buffer-name "context"))))
+      (with-current-buffer download-buffer
+        (set-buffer download-buffer)
+        (goto-char (point-min))
+        (re-search-forward "\r?\n\r?\n")
+        (let ((coding-system-for-write 'no-conversion))
+          (write-region (point)
+                        (point-max)
+                        filename)))
+      (funcall cb
+               (reverso--alist-remove-empty-values
+                (reverso--get-context-parse
+                 (with-temp-buffer (insert-file-contents
+                                    filename)
+                                   (buffer-substring-no-properties
+                                    (point-min)
+                                    (point-max)))))))))
 
 (defun reverso--get-context-parse (data)
   "Parse response from reverso context API.
@@ -453,15 +491,18 @@ The result is a list of alists with the keys:
 DATA is an html string."
   (let ((html (with-temp-buffer
                 (insert data)
-                (libxml-parse-html-region (point-min) (point-max)))))
+                (libxml-parse-html-region (point-min)
+                                          (point-max)))))
     (let ((examples (dom-by-id html "examples-content")))
       (cl-loop for child in (dom-non-text-children examples)
                for classes = (alist-get 'class (dom-attributes child))
                when (string-match-p (rx "example") classes)
-               collect (let ((src (dom-by-class (dom-by-class child "src") "text"))
-                             (trg (dom-by-class (dom-by-class child "trg") "text")))
-                         `((:source . ,(reverso--convert-string src))
-                           (:target . ,(reverso--convert-string trg))))))))
+               collect
+               (let ((src (dom-by-class (dom-by-class child "src") "text"))
+                     (trg (dom-by-class (dom-by-class child "trg")
+                                        "text")))
+                 `((:source . ,(reverso--convert-string src))
+                   (:target . ,(reverso--convert-string trg))))))))
 
 (defun reverso--get-synonyms (text language cb)
   "Get synonyms for TEXT in LANGUAGE.
@@ -479,7 +520,8 @@ The result is a list of alists with the following keys:
   (unless (alist-get language reverso--language-mapping-1)
     (error "Wrong language: %s" language))
   (request (concat (alist-get 'synonyms reverso--urls)
-                   (symbol-name (alist-get language reverso--language-mapping-1)) "/"
+                   (symbol-name (alist-get language reverso--language-mapping-1))
+                   "/"
                    (url-hexify-string text))
     :type "GET"
     :headers `(("Accept" . "*/*")
@@ -629,14 +671,8 @@ SOURCE-TEXT is the text sent for checking.  DATA is the JSON reply."
 
 (defvar reverso-result-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "q") (lambda ()
-                                (interactive)
-                                (quit-window t)))
-    (when (fboundp #'evil-define-key*)
-      (evil-define-key* '(normal motion) map
-        "q" (lambda ()
-              (interactive)
-              (quit-window t))))
+    (define-key map (kbd "q") 'quit-window)
+    (define-key map (kbd "C-x 0") 'kill-this-buffer)
     map)
   "Keymap used in `reverso-result-mode' buffers.")
 
@@ -735,7 +771,8 @@ DATA is a list of alists with the following keys:
 - `:target': string in the target language (LANG-TO)"
   (cl-loop with lang-to-name = (symbol-name lang-to)
            with lang-from-name = (symbol-name lang-from)
-           with lang-length = (max (length lang-to-name) (length lang-from-name))
+           with lang-length = (max (length lang-to-name)
+                                   (length lang-from-name))
            for datum in data
            for source = (alist-get :source datum)
            for target = (alist-get :target datum)
@@ -880,20 +917,71 @@ CORR is one element of the `:corrections' list, as defined in
       (insert "\n"))
     (insert "\n")))
 
+(defun reverso-recode (language str)
+  "Recode STR due to LANGUAGE settings in `reverso-recode-alist'.
+If no settings found, return STR as it."
+  (if-let ((args
+            (cdr (assq language reverso-recode-alist))))
+      (let ((inhibit-read-only t))
+        (with-temp-buffer (erase-buffer)
+                          (insert str)
+                          (apply #'recode-region (append (list (point-min)
+                                                               (point-max))
+                                                         args))
+                          (buffer-string)))
+    str))
+
+(defun reverso-results-buffer (buffer content)
+  "Show CONTENT in BUFFER."
+  (let ((buffer (get-buffer-create buffer)))
+    (with-current-buffer buffer
+      (with-current-buffer-window
+          buffer
+          (cons (or 'display-buffer-in-direction)
+                '((window-height . window-preserve-size)))
+          (lambda (window _value)
+            (with-selected-window window
+              (setq buffer-read-only t)
+              (let ((inhibit-read-only t))
+                (erase-buffer)
+                (progn  (save-excursion
+                          (insert content))
+                        (add-hook 'kill-buffer-hook
+                                  'momentary-popup-minibuffer-select-window
+                                  nil t)
+                        (use-local-map
+                         (let ((map (copy-keymap
+                                     reverso-result-mode-map)))
+                           (if buffer-read-only
+                               (define-key map (kbd "q")
+                                           'kill-this-buffer)
+                             (define-key map (kbd "q")
+                                         'self-insert-command))
+                           (add-hook
+                            'read-only-mode-hook
+                            (lambda ()
+                              (if buffer-read-only
+                                  (define-key map (kbd "q")
+                                              'kill-this-buffer)
+                                (define-key map (kbd "q")
+                                            'self-insert-command)))
+                            t)
+                           (set-keymap-parent map (current-local-map))
+                           map)))))))
+      (setq header-line-format (or header-line-format "*Results*"))
+      (unless (active-minibuffer-window)
+        (select-window (get-buffer-window buffer))))))
+
 (defmacro reverso--with-buffer (&rest body)
   "Execute BODY in a clean `reverso' results buffer."
   (declare (indent 0))
   `(progn
-     (let ((buffer (get-buffer-create
-                    (generate-new-buffer-name "*Reverso*"))))
-       (with-current-buffer buffer
-         (unless (derived-mode-p 'reverso-result-mode)
-           (reverso-result-mode))
-         (let ((inhibit-read-only t))
-           (erase-buffer)
-           ,@body)
-         (goto-char (point-min)))
-       (switch-to-buffer-other-window buffer))))
+     (let ((header-line-format "*Reverso Results*"))
+       (reverso-results-buffer
+        "*Reverso Results*"
+        (with-temp-buffer
+          ,@body
+          (buffer-string))))))
 
 ;;; In-buffer correction
 (defun reverso-check-clear (&optional region-start region-end)
@@ -1090,18 +1178,21 @@ used instead.")
 
 OBJ is an instance of the class."
   (oset obj value
-        (cond
-         ((and (slot-boundp obj 'value) (oref obj value))
-          (oref obj value))
-         ((region-active-p)
-          (buffer-substring-no-properties (region-beginning) (region-end)))
-         ((or (equal current-prefix-arg '(4))
-              reverso--use-buffer-as-input)
-          (if reverso--output
-              reverso--output
-            (buffer-substring-no-properties (point-min) (point-max))))
-         (reverso--input reverso--input)
-         (t ""))))
+        (cond ((and (slot-boundp obj 'value)
+                    (oref obj value))
+               (oref obj value))
+              ((region-active-p)
+               (buffer-substring-no-properties (region-beginning)
+                                               (region-end)))
+              ((or (equal current-prefix-arg '(4))
+                   reverso--use-buffer-as-input)
+               (if reverso--output
+                   reverso--output
+                 (buffer-substring-no-properties (point-min)
+                                                 (point-max))))
+              (reverso--input reverso--input)
+              (t (or (thing-at-point 'word t)
+                     "")))))
 
 (cl-defmethod transient-infix-read ((obj reverso--transient-input))
   "Read input string from the minibuffer.
@@ -1144,15 +1235,37 @@ OBJ is an instance of `reverso--transient-input'."
    (is-target :initarg :is-target :initform nil))
   "Class used for switching the language.")
 
-(defvar reverso--source-value nil
+(defcustom reverso--source-value 'english
   "Selected source language in `reverso'.
 
-Used for persistence between invocations of transient buffers.")
+Used for persistence between invocations of transient buffers."
+  :group 'reverso
+  :type
+  `(radio ,@(mapcar
+             (pcase-lambda (`(,key . ,_val))
+               `(const
+                 :tag
+                 ,(capitalize
+                   (symbol-name
+                    key))
+                 ,key))
+             reverso--language-mapping)))
 
-(defvar reverso--target-value nil
+(defcustom reverso--target-value 'russian
   "Selected target language in `reverso'.
 
-Used for persistence between invocations of transient buffers.")
+Used for persistence between invocations of transient buffers."
+  :group 'reverso
+  :type
+  `(radio ,@(mapcar
+             (pcase-lambda (`(,key . ,_val))
+               `(const
+                 :tag
+                 ,(capitalize
+                   (symbol-name
+                    key))
+                 ,key))
+             reverso--language-mapping)))
 
 (defvar reverso--prefer-brief nil
   "If non-nil, select brief translation display by default.
@@ -1233,7 +1346,8 @@ OBJ is an instance of `reverso--transient-language'."
                     (if (eq choice value)
                         'transient-value
                       'transient-inactive-value)))
-      (reverso--get-available-languages obj)
+      (append (list value)
+              (remove value (reverso--get-available-languages obj)))
       (propertize "|" 'face 'transient-inactive-value))
      (propertize "]" 'face 'transient-inactive-value))))
 
@@ -1245,7 +1359,8 @@ OBJ is an instance of `reverso--transient-language'."
          (current-idx (or (cl-position (transient-infix-value obj) choices) -1))
          (next-idx (% (1+ current-idx) (length choices)))
          (next-choice
-          (if (> (length choices) reverso-language-completing-read-threshold)
+          (if (> (length choices)
+                 reverso-language-completing-read-threshold)
               (let ((lang (intern
                            (completing-read
                             "Language: "
@@ -1331,16 +1446,16 @@ OBJ is an instance of `reverso--transient-brief'."
   :description "Brief translation output")
 
 (transient-define-suffix reverso--translate-exec-suffix (input source target &optional is-brief)
-  :key "e"
+  :key "RET"
   :description "Translate"
   (interactive (transient-args transient-current-command))
   (reverso--translate
    input source target
    (lambda (data)
      (reverso--with-buffer
-       (if is-brief
-           (reverso--translate-render-brief input data)
-         (reverso--translate-render input data))))))
+      (if is-brief
+          (reverso--translate-render-brief input data)
+        (reverso--translate-render input data))))))
 
 ;;;###autoload (autoload 'reverso-translate "reverso" nil t)
 (transient-define-prefix reverso-translate ()
@@ -1382,7 +1497,7 @@ input."
   :is-target t)
 
 (transient-define-suffix reverso--context-exec-suffix (input source target)
-  :key "e"
+  :key "RET"
   :description "Find context"
   (interactive (transient-args transient-current-command))
   (reverso--get-context
@@ -1446,7 +1561,7 @@ inputs."
   :languages (alist-get 'grammar reverso--languages))
 
 (transient-define-suffix reverso--grammar-exec-suffix (input source)
-  :key "e"
+  :key "RET"
   :description "Check grammar"
   (interactive (transient-args transient-current-command))
   (reverso--get-grammar
@@ -1467,19 +1582,19 @@ inputs."
    (reverso--grammar-exec-suffix)
    ("q" "Quit" transient-quit-one)])
 
-(defclass reverso--transient-curent-error (transient-suffix)
+(defclass reverso--transient-current-error (transient-suffix)
   ((transient :initform t))
   "A class to display reverso error point.")
 
-(cl-defmethod transient-init-value ((_ reverso--transient-curent-error))
-  "A dummy method for `reverso--transient-curent-error'.
+(cl-defmethod transient-init-value ((_ reverso--transient-current-error))
+  "A dummy method for `reverso--transient-current-error'.
 
 The class doesn't actually have any value, but this is necessary for transient."
   nil)
 
 (defvar reverso--current-grammar-check-buffer nil)
 
-(cl-defmethod transient-format ((_ reverso--transient-curent-error))
+(cl-defmethod transient-format ((_ reverso--transient-current-error))
   "Format reverso error at point."
   (when reverso--current-grammar-check-buffer
     (if-let ((err
@@ -1491,7 +1606,7 @@ The class doesn't actually have any value, but this is necessary for transient."
       "No error at point")))
 
 (transient-define-infix reverso--transient-current-error-infix ()
-  :class 'reverso--transient-curent-error
+  :class 'reverso--transient-current-error
   ;; A dummy key. Seems to be necessary for transient.
   ;; Just don't press ~ while in the buffer.
   :key "~~1")
@@ -1547,7 +1662,7 @@ region.  Otherwise, use the entire buffer."
    ("N" "Last error" reverso-check-last-error :transient t)]
   ["Actions"
    :class transient-row
-   ("e" "Check grammar" reverso--grammar-buffer-exec-suffix :transient t)
+   ("RET" "Check grammar" reverso--grammar-buffer-exec-suffix :transient t)
    ("c" "Clear" reverso-check-clear :transient t)
    ("q" "Quit" transient-quit-one)]
   (interactive)
@@ -1579,3 +1694,8 @@ The following features are implemented as nested transient buffers:
 (provide 'reverso)
 
 ;;; reverso.el ends here
+
+;; Local Variables:
+;; checkdoc-verb-check-experimental-flag: nil
+;; checkdoc--disambiguate-symbol-flag: nil
+;; End:
