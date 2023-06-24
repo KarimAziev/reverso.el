@@ -671,8 +671,8 @@ SOURCE-TEXT is the text sent for checking.  DATA is the JSON reply."
 
 (defvar reverso-result-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "q") 'quit-window)
-    (define-key map (kbd "C-x 0") 'kill-this-buffer)
+    (define-key map (kbd "q") #'quit-window)
+    (define-key map (kbd "C-x 0") #'kill-this-buffer)
     map)
   "Keymap used in `reverso-result-mode' buffers.")
 
@@ -946,25 +946,22 @@ If no settings found, return STR as it."
                 (erase-buffer)
                 (progn  (save-excursion
                           (insert content))
-                        (add-hook 'kill-buffer-hook
-                                  'momentary-popup-minibuffer-select-window
-                                  nil t)
                         (use-local-map
                          (let ((map (copy-keymap
                                      reverso-result-mode-map)))
                            (if buffer-read-only
                                (define-key map (kbd "q")
-                                           'kill-this-buffer)
+                                           #'kill-this-buffer)
                              (define-key map (kbd "q")
-                                         'self-insert-command))
+                                         #'self-insert-command))
                            (add-hook
                             'read-only-mode-hook
                             (lambda ()
                               (if buffer-read-only
                                   (define-key map (kbd "q")
-                                              'kill-this-buffer)
+                                              #'kill-this-buffer)
                                 (define-key map (kbd "q")
-                                            'self-insert-command)))
+                                            #'self-insert-command)))
                             t)
                            (set-keymap-parent map (current-local-map))
                            map)))))))
