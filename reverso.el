@@ -415,9 +415,7 @@ ALIST is an alist, LOOKUP-VALUE is a value to look in `cdr'."
                                                                 response))
                     collect
                     `((:translation .
-                                    ,(reverso-recode language-to
-                                                     (alist-get
-                                                      'translation r)))
+                                    ,(alist-get 'translation r))
                       (:context .
                                 ,(cl-loop for source across (alist-get
                                                              'sourceExamples
@@ -430,14 +428,12 @@ ALIST is an alist, LOOKUP-VALUE is a value to look in `cdr'."
                                                          source))
                                             (:target .
                                                      ,(reverso--convert-string-html
-                                                       (reverso-recode
-                                                        language-to
-                                                        target))))))))))
+                                                       target)))))))))
       `((:corrected-text . ,corrected-text)
         (:language-from . ,language-from)
         (:language-to . ,language-to)
         (:detected-language . ,detected-language)
-        (:translation . ,(reverso-recode language-to translation))
+        (:translation . ,translation)
         (:context-results . ,context-results)))))
 
 (defun reverso--get-context (text source target cb)
