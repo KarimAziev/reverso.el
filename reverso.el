@@ -1544,6 +1544,7 @@ inputs."
    (reverso--transient-synonyms-language)]
   ["Actions"
    (reverso--synonyms-exec-suffix)
+   ("RET" reverso--synonyms-exec-suffix)
    ("q" "Quit" transient-quit-one)])
 
 (transient-define-infix reverso--transient-grammar-language ()
