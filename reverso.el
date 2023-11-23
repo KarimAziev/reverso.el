@@ -961,6 +961,8 @@ If no settings found, return STR as it."
                             t)
                            (set-keymap-parent map (current-local-map))
                            map)))))))
+      (when (fboundp 'visual-line-mode)
+        (visual-line-mode 1))
       (setq header-line-format (or header-line-format "*Results*"))
       (unless (active-minibuffer-window)
         (select-window (get-buffer-window buffer))))))
