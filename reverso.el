@@ -668,7 +668,7 @@ SOURCE-TEXT is the text sent for checking.  DATA is the JSON reply."
 (defvar reverso-result-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "q") #'quit-window)
-    (define-key map (kbd "C-x 0") #'kill-this-buffer)
+    (define-key map (kbd "C-x 0") #'kill-current-buffer)
     map)
   "Keymap used in `reverso-result-mode' buffers.")
 
@@ -947,7 +947,7 @@ If no settings found, return STR as it."
                                      reverso-result-mode-map)))
                            (if buffer-read-only
                                (define-key map (kbd "q")
-                                           #'kill-this-buffer)
+                                           #'kill-current-buffer)
                              (define-key map (kbd "q")
                                          #'self-insert-command))
                            (add-hook
@@ -955,7 +955,7 @@ If no settings found, return STR as it."
                             (lambda ()
                               (if buffer-read-only
                                   (define-key map (kbd "q")
-                                              #'kill-this-buffer)
+                                              #'kill-current-buffer)
                                 (define-key map (kbd "q")
                                             #'self-insert-command)))
                             t)
