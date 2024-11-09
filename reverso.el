@@ -916,7 +916,7 @@ CORR is one element of the `:corrections' list, as defined in
 (defun reverso-recode (language str)
   "Recode STR due to LANGUAGE settings in `reverso-recode-alist'.
 If no settings found, return STR as it."
-  (if-let ((args
+  (if-let* ((args
             (cdr (assq language reverso-recode-alist))))
       (let ((inhibit-read-only t))
         (with-temp-buffer (erase-buffer)
@@ -1593,7 +1593,7 @@ The class doesn't actually have any value, but this is necessary for transient."
 (cl-defmethod transient-format ((_ reverso--transient-current-error))
   "Format reverso error at point."
   (when reverso--current-grammar-check-buffer
-    (if-let ((err
+    (if-let* ((err
               (with-current-buffer reverso--current-grammar-check-buffer
                 (reverso--get-error-at-point))))
         (with-temp-buffer
